@@ -58,13 +58,12 @@ class VertexRDD(RDD):
             if hasattr(x, "__iter__"):
                 x_id = x[0]
                 try:
-                    return (long(x_id), x[1:])
+                    return tuple([long(x_id)]+ [i for i in x[1:]])
                 except:
                     return None
             else:
-                x_id = x
                 try:
-                    return (long(x_id), ())
+                    return (long(x), x)
                 except:
                     return None
         
@@ -74,13 +73,10 @@ class VertexRDD(RDD):
     def count(self):
         return self.partitionsRDD.map(lambda x: 1).reduce(lambda x, y: x+y)
         
-    def mapVertexPartitions(self, f):
-        newPartitionsRDD = self.partitionsRDD.mapPartitions(f, True)
-        return VertexRDD(newPartitionsRDD)
-        
-    def filter(self, f):
-        return self.mapVertexPartitions(f)
-        
+    # def mapVertexPartitions(self, f):
+    #     newPartitionsRDD = self.partitionsRDD.mapPartitions(f, True)
+    #     return VertexRDD(newPartitionsRDD)
+                
     # def mapValues(self, f):
     #     return self.mapVertexPartitions(lambda x)
         

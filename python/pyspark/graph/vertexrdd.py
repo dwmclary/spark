@@ -67,21 +67,82 @@ class VertexRDD(RDD):
                 except:
                     return None
         
-        #this is this the index
+        #this is the index
         self.partitionsRDD = partitionsRDD.map(lambda x: _add_id(x)).distinct()
 
+    # this probably doesn't preserve partitions, it's here for api completeness
+    def mapVertexPartitions(self, f):
+        return self.partitionsRDD.map(f)
+        
+    # def filter(self, f):
+    #     """
+    #     >>> ftest = VertexRDD(sc.parallelize(range(100)))
+    #     >>> evens = ftest.filter(lambda x: x%2 == 0)
+    #     >>> evens.count() == len(filter(lambda x: x%2 == 0, range(100)))
+    #     True
+    #     """
+    #     return self.filter(f)
+
+    def _mapVertexIDs(self, f):
+        return self.partitionsRDD.map(lambda x: f(x[0]))
+    
+    #helper function for getting vids
+    def _vertexIDs(self):
+        return self.partitionsRDD.map(lambda x: x[0])
+        
+    #the existing test for mapValues seems odd to me, this is a deviation
+    #note that if we have multiple attributes on a vertex, all attributes will be passed to f
+    def mapValues(self, f):
+        """
+        >>> vertices = VertexRDD(sc.parallelize(range(100)))
+        >>> negatives = vertices.mapValues(lambda x: -x[0]).cache()
+        >>> positives = vertices.mapValues(lambda x: x[0])
+        >>> positives.union(negatives).sum()
+        0
+        """
+        return self.partitionsRDD.map(lambda x: f(x[1:]))
+        
+    def diff(self, other):
+        """
+        >>> a = VertexRDD(sc.parallelize(range(50)))
+        >>> b = VertexRDD(sc.parallelize(range(25,75)))
+        >>> c = a.diff(b)
+        >>> c.filter(lambda x: x == 50).count()
+        0
+        """
+        to_rem = VertexRDD(self._vertexIDs().intersection(other._vertexIDs()))
+        return VertexRDD(self.partitionsRDD.subtractByKey(to_rem.partitionsRDD).union(other.partitionsRDD.subtractByKey(to_rem.partitionsRDD)))
+        
+    def join(self, other):
+        def clear_and_flat(v):
+            g = list(v)
+            new_v = [g.pop(0)]
+            
+            def flat_iter(v1):
+                s = set()
+                for i in v1:
+                    if hasattr(i, "__iter__"):
+                        s.update([x for x in i])
+                    else:
+                        s.add(i)
+                return s
+                
+            while len(g) > 0:
+                s = flat_iter(list(g.pop(0)))
+                new_v += list(s)
+            return tuple(new_v)
+        return VertexRDD(self.partitionsRDD.join(other.partitionsRDD).map(clear_and_flat))
+        
     def count(self):
+        """
+        >>> ftest = VertexRDD(sc.parallelize(range(100)))
+        >>> ftest.count()
+        100
+        """
         return self.partitionsRDD.map(lambda x: 1).reduce(lambda x, y: x+y)
         
-    # def mapVertexPartitions(self, f):
-    #     newPartitionsRDD = self.partitionsRDD.mapPartitions(f, True)
-    #     return VertexRDD(newPartitionsRDD)
-                
-    # def mapValues(self, f):
-    #     return self.mapVertexPartitions(lambda x)
-        
-    def take(self, n):
-        return self.partitionsRDD.take(n)
+    # def take(self, n):
+    #     return self.partitionsRDD.take(n)
     
     def takeOrdered(self, n, key=None):
         return self.partitionsRDD.takeOrdered(n,key)

@@ -58,7 +58,10 @@ class VertexRDD(RDD):
             if hasattr(x, "__iter__"):
                 x_id = x[0]
                 try:
-                    return tuple([long(x_id)]+ [i for i in x[1:]])
+                    if len(x) > 2:
+                        return (long(x_id), tuple(x[1:]))
+                    else:
+                        return (long(x_id), x[1])
                 except:
                     return None
             else:
@@ -116,7 +119,8 @@ class VertexRDD(RDD):
     def join(self, other):
         def clear_and_flat(v):
             g = list(v)
-            new_v = [g.pop(0)]
+            key = g.pop(0)
+            new_v = []
             
             def flat_iter(v1):
                 s = set()
@@ -130,7 +134,9 @@ class VertexRDD(RDD):
             while len(g) > 0:
                 s = flat_iter(list(g.pop(0)))
                 new_v += list(s)
-            return tuple(new_v)
+            if len(new_v) > 1:
+                new_v = tuple(new_v)                
+            return (key, new_v)
         return VertexRDD(self.partitionsRDD.join(other.partitionsRDD).map(clear_and_flat))
         
     def count(self):

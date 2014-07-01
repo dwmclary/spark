@@ -70,21 +70,23 @@ class VertexRDD(RDD):
                 except:
                     return None
         
-        #this is the index
+        # this is the index -- note that partitionsRDD is misleading
+        # we don't actually have partitioning in pyspark, but we keep
+        # the same name to maintain some consistency with the scala version
         self.partitionsRDD = partitionsRDD.map(lambda x: _add_id(x)).distinct()
 
     # this probably doesn't preserve partitions, it's here for api completeness
     def mapVertexPartitions(self, f):
         return self.partitionsRDD.map(f)
         
-    # def filter(self, f):
-    #     """
-    #     >>> ftest = VertexRDD(sc.parallelize(range(100)))
-    #     >>> evens = ftest.filter(lambda x: x%2 == 0)
-    #     >>> evens.count() == len(filter(lambda x: x%2 == 0, range(100)))
-    #     True
-    #     """
-    #     return self.filter(f)
+    def filter(self, f):
+        """
+        >>> verts = VertexRDD(sc.parallelize(range(100)))
+        >>> evens = ftest.filter(lambda x: x[-1]%2 == 0)
+        >>> evens.count() == len(filter(lambda x: x%2 == 0, range(100)))
+        True
+        """
+        return VertexRDD(self.partitionsRDD.filter(f))
 
     def _mapVertexIDs(self, f):
         return self.partitionsRDD.map(lambda x: f(x[0]))
@@ -116,12 +118,25 @@ class VertexRDD(RDD):
         to_rem = VertexRDD(self._vertexIDs().intersection(other._vertexIDs()))
         return VertexRDD(self.partitionsRDD.subtractByKey(to_rem.partitionsRDD).union(other.partitionsRDD.subtractByKey(to_rem.partitionsRDD)))
         
+    
+    #synonym for inner join in this case    
     def join(self, other):
+        """
+        >>> a = VertexRDD(sc.parallelize([(1, "scott"), (2, "patty")]))
+        >>> b = VertexRDD(sc.parallelize([(1, "tiger"), (2, "pachyderm")]))
+        >>> a.join(b).take(3)
+        [(1L, ('tiger', 'scott')), (2L, ('pachyderm', 'patty'))]
+        >>> v = VertexRDD(sc.parallelize(range(100)))
+        >>> evens = v.filter(lambda x: x[-1]%2 == 0)
+        >>> v.join(evens).count()
+        """
+        #this is currently pretty gross for the sake of assuming that we want flat attributes
+        #it cleans up substantially if we're willing to take nested tuples for the vertex values
         def clear_and_flat(v):
             g = list(v)
             key = g.pop(0)
             new_v = []
-            
+
             def flat_iter(v1):
                 s = set()
                 for i in v1:
@@ -130,14 +145,52 @@ class VertexRDD(RDD):
                     else:
                         s.add(i)
                 return s
-                
+
             while len(g) > 0:
                 s = flat_iter(list(g.pop(0)))
                 new_v += list(s)
             if len(new_v) > 1:
-                new_v = tuple(new_v)                
+                new_v = tuple(new_v)
+            else:
+                new_v = new_v[0]
+
             return (key, new_v)
+
         return VertexRDD(self.partitionsRDD.join(other.partitionsRDD).map(clear_and_flat))
+        
+    def leftOuterJoin(self, other):
+        #this is currently pretty gross for the sake of assuming that we want flat attributes
+        #it cleans up substantially if we're willing to take nested tuples for the vertex values
+        def clear_and_flat(v):
+            g = list(v)
+            key = g.pop(0)
+            new_v = []
+
+            def flat_iter(v1):
+                s = set()
+                for i in v1:
+                    if hasattr(i, "__iter__"):
+                        s.update([x for x in i])
+                    else:
+                        s.add(i)
+                return s
+
+            while len(g) > 0:
+                s = flat_iter(list(g.pop(0)))
+                new_v += list(s)
+            if len(new_v) > 1:
+                new_v = tuple(new_v)
+            else:
+                new_v = new_v[0]
+
+            return (key, new_v)
+        return VertexRDD(self.partitionsRDD.leftOuterJoin(other.partitionsRDD).map(clear_and_flat))
+        
+    def innerJoin(self, other):
+        return self.join(other)
+        
+    def aggregateUsingIndex(self, zeroValue, seqFunc, combFunc, numPartitions=None):
+        return self.partitionsRDD.aggregateByKey(zeroValue, seqFunc, combFunc, numPartitions)
         
     def count(self):
         """
@@ -147,8 +200,8 @@ class VertexRDD(RDD):
         """
         return self.partitionsRDD.map(lambda x: 1).reduce(lambda x, y: x+y)
         
-    # def take(self, n):
-    #     return self.partitionsRDD.take(n)
+    def take(self, n):
+        return self.partitionsRDD.take(n)
     
     def takeOrdered(self, n, key=None):
         return self.partitionsRDD.takeOrdered(n,key)

@@ -30,6 +30,7 @@ import org.apache.spark.util.logging.FileAppender
 
 /**
  * Manages the execution of one executor process.
+ * This is currently only used in standalone mode.
  */
 private[spark] class ExecutorRunner(
     val appId: String,
@@ -41,7 +42,7 @@ private[spark] class ExecutorRunner(
     val workerId: String,
     val host: String,
     val sparkHome: File,
-    val workDir: File,
+    val executorDir: File,
     val workerUrl: String,
     val conf: SparkConf,
     var state: ExecutorState.Value)
@@ -72,11 +73,12 @@ private[spark] class ExecutorRunner(
   }
 
   /**
-   * kill executor process, wait for exit and notify worker to update resource status
+   * Kill executor process, wait for exit and notify worker to update resource status.
    *
    * @param message the exception message which caused the executor's death 
    */
   private def killProcess(message: Option[String]) {
+    var exitCode: Option[Int] = None
     if (process != null) {
       logInfo("Killing process!")
       process.destroy()
@@ -87,9 +89,9 @@ private[spark] class ExecutorRunner(
       if (stderrAppender != null) {
         stderrAppender.stop()
       }
-      val exitCode = process.waitFor()
-      worker ! ExecutorStateChanged(appId, execId, state, message, Some(exitCode))
+      exitCode = Some(process.waitFor())
     }
+    worker ! ExecutorStateChanged(appId, execId, state, message, exitCode)
   }
 
   /** Stop this executor runner, including killing the process it launched */
@@ -113,10 +115,13 @@ private[spark] class ExecutorRunner(
   }
 
   def getCommandSeq = {
-    val command = Command(appDesc.command.mainClass,
-      appDesc.command.arguments.map(substituteVariables) ++ Seq(appId), appDesc.command.environment,
-      appDesc.command.classPathEntries, appDesc.command.libraryPathEntries,
-      appDesc.command.extraJavaOptions)
+    val command = Command(
+      appDesc.command.mainClass,
+      appDesc.command.arguments.map(substituteVariables) ++ Seq(appId),
+      appDesc.command.environment,
+      appDesc.command.classPathEntries,
+      appDesc.command.libraryPathEntries,
+      appDesc.command.javaOpts)
     CommandUtils.buildCommandSeq(command, memory, sparkHome.getAbsolutePath)
   }
 
@@ -125,12 +130,6 @@ private[spark] class ExecutorRunner(
    */
   def fetchAndRunExecutor() {
     try {
-      // Create the executor's working directory
-      val executorDir = new File(workDir, appId + "/" + execId)
-      if (!executorDir.mkdirs()) {
-        throw new IOException("Failed to create directory " + executorDir)
-      }
-
       // Launch the process
       val command = getCommandSeq
       logInfo("Launch command: " + command.mkString("\"", "\" \"", "\""))
@@ -154,6 +153,8 @@ private[spark] class ExecutorRunner(
       Files.write(header, stderr, Charsets.UTF_8)
       stderrAppender = FileAppender(process.getErrorStream, stderr, conf)
 
+      state = ExecutorState.RUNNING
+      worker ! ExecutorStateChanged(appId, execId, state, None, None)
       // Wait for it to exit; executor may exit with code 0 (when driver instructs it to shutdown)
       // or with nonzero exit code
       val exitCode = process.waitFor()

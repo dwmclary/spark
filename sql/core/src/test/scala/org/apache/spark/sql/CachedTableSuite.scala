@@ -18,77 +18,188 @@
 package org.apache.spark.sql
 
 import org.apache.spark.sql.TestData._
-import org.apache.spark.sql.columnar.{InMemoryRelation, InMemoryColumnarTableScan}
-import org.apache.spark.sql.test.TestSQLContext
+import org.apache.spark.sql.columnar.{InMemoryColumnarTableScan, InMemoryRelation}
+import org.apache.spark.sql.test.TestSQLContext._
+import org.apache.spark.storage.{StorageLevel, RDDBlockId}
+
+case class BigData(s: String)
 
 class CachedTableSuite extends QueryTest {
   TestData // Load test tables.
 
-  // NOTE: ALL TESTS ARE IGNORED PENDING SPARK-2264
-
-  ignore("read from cached table and uncache") {
-    TestSQLContext.cacheTable("testData")
-
-    checkAnswer(
-      TestSQLContext.table("testData"),
-      testData.collect().toSeq
-    )
-
-    TestSQLContext.table("testData").queryExecution.analyzed match {
-      case _ : InMemoryRelation => // Found evidence of caching
-      case noCache => fail(s"No cache node found in plan $noCache")
+  def assertCached(query: SchemaRDD, numCachedTables: Int = 1): Unit = {
+    val planWithCaching = query.queryExecution.withCachedData
+    val cachedData = planWithCaching collect {
+      case cached: InMemoryRelation => cached
     }
 
-    TestSQLContext.uncacheTable("testData")
+    assert(
+      cachedData.size == numCachedTables,
+      s"Expected query to contain $numCachedTables, but it actually had ${cachedData.size}\n" +
+        planWithCaching)
+  }
 
-    checkAnswer(
-      TestSQLContext.table("testData"),
-      testData.collect().toSeq
-    )
+  def rddIdOf(tableName: String): Int = {
+    val executedPlan = table(tableName).queryExecution.executedPlan
+    executedPlan.collect {
+      case InMemoryColumnarTableScan(_, _, relation) =>
+        relation.cachedColumnBuffers.id
+      case _ =>
+        fail(s"Table $tableName is not cached\n" + executedPlan)
+    }.head
+  }
 
-    TestSQLContext.table("testData").queryExecution.analyzed match {
-      case cachePlan: InMemoryRelation =>
-        fail(s"Table still cached after uncache: $cachePlan")
-      case noCache => // Table uncached successfully
+  def isMaterialized(rddId: Int): Boolean = {
+    sparkContext.env.blockManager.get(RDDBlockId(rddId, 0)).nonEmpty
+  }
+
+  test("too big for memory") {
+    val data = "*" * 10000
+    sparkContext.parallelize(1 to 200000, 1).map(_ => BigData(data)).registerTempTable("bigData")
+    table("bigData").persist(StorageLevel.MEMORY_AND_DISK)
+    assert(table("bigData").count() === 200000L)
+    table("bigData").unpersist()
+  }
+
+  test("calling .cache() should use in-memory columnar caching") {
+    table("testData").cache()
+    assertCached(table("testData"))
+  }
+
+  test("calling .unpersist() should drop in-memory columnar cache") {
+    table("testData").cache()
+    table("testData").count()
+    table("testData").unpersist(blocking = true)
+    assertCached(table("testData"), 0)
+  }
+
+  test("isCached") {
+    cacheTable("testData")
+
+    assertCached(table("testData"))
+    assert(table("testData").queryExecution.withCachedData match {
+      case _: InMemoryRelation => true
+      case _ => false
+    })
+
+    uncacheTable("testData")
+    assert(!isCached("testData"))
+    assert(table("testData").queryExecution.withCachedData match {
+      case _: InMemoryRelation => false
+      case _ => true
+    })
+  }
+
+  test("SPARK-1669: cacheTable should be idempotent") {
+    assume(!table("testData").logicalPlan.isInstanceOf[InMemoryRelation])
+
+    cacheTable("testData")
+    assertCached(table("testData"))
+
+    assertResult(1, "InMemoryRelation not found, testData should have been cached") {
+      table("testData").queryExecution.withCachedData.collect {
+        case r: InMemoryRelation => r
+      }.size
+    }
+
+    cacheTable("testData")
+    assertResult(0, "Double InMemoryRelations found, cacheTable() is not idempotent") {
+      table("testData").queryExecution.withCachedData.collect {
+        case r @ InMemoryRelation(_, _, _, _, _: InMemoryColumnarTableScan) => r
+      }.size
     }
   }
 
-  ignore("correct error on uncache of non-cached table") {
+  test("read from cached table and uncache") {
+    cacheTable("testData")
+    checkAnswer(table("testData"), testData.collect().toSeq)
+    assertCached(table("testData"))
+
+    uncacheTable("testData")
+    checkAnswer(table("testData"), testData.collect().toSeq)
+    assertCached(table("testData"), 0)
+  }
+
+  test("correct error on uncache of non-cached table") {
     intercept[IllegalArgumentException] {
-      TestSQLContext.uncacheTable("testData")
+      uncacheTable("testData")
     }
   }
 
-  ignore("SELECT Star Cached Table") {
-    TestSQLContext.sql("SELECT * FROM testData").registerAsTable("selectStar")
-    TestSQLContext.cacheTable("selectStar")
-    TestSQLContext.sql("SELECT * FROM selectStar WHERE key = 1").collect()
-    TestSQLContext.uncacheTable("selectStar")
-  }
-
-  ignore("Self-join cached") {
-    val unCachedAnswer =
-      TestSQLContext.sql("SELECT * FROM testData a JOIN testData b ON a.key = b.key").collect()
-    TestSQLContext.cacheTable("testData")
+  test("SELECT star from cached table") {
+    sql("SELECT * FROM testData").registerTempTable("selectStar")
+    cacheTable("selectStar")
     checkAnswer(
-      TestSQLContext.sql("SELECT * FROM testData a JOIN testData b ON a.key = b.key"),
-      unCachedAnswer.toSeq)
-    TestSQLContext.uncacheTable("testData")
+      sql("SELECT * FROM selectStar WHERE key = 1"),
+      Seq(Row(1, "1")))
+    uncacheTable("selectStar")
   }
 
-  ignore("'CACHE TABLE' and 'UNCACHE TABLE' SQL statement") {
-    TestSQLContext.sql("CACHE TABLE testData")
-    TestSQLContext.table("testData").queryExecution.executedPlan match {
-      case _: InMemoryColumnarTableScan => // Found evidence of caching
-      case _ => fail(s"Table 'testData' should be cached")
-    }
-    assert(TestSQLContext.isCached("testData"), "Table 'testData' should be cached")
+  test("Self-join cached") {
+    val unCachedAnswer =
+      sql("SELECT * FROM testData a JOIN testData b ON a.key = b.key").collect()
+    cacheTable("testData")
+    checkAnswer(
+      sql("SELECT * FROM testData a JOIN testData b ON a.key = b.key"),
+      unCachedAnswer.toSeq)
+    uncacheTable("testData")
+  }
 
-    TestSQLContext.sql("UNCACHE TABLE testData")
-    TestSQLContext.table("testData").queryExecution.executedPlan match {
-      case _: InMemoryColumnarTableScan => fail(s"Table 'testData' should not be cached")
-      case _ => // Found evidence of uncaching
-    }
-    assert(!TestSQLContext.isCached("testData"), "Table 'testData' should not be cached")
+  test("'CACHE TABLE' and 'UNCACHE TABLE' SQL statement") {
+    sql("CACHE TABLE testData")
+    assertCached(table("testData"))
+
+    val rddId = rddIdOf("testData")
+    assert(
+      isMaterialized(rddId),
+      "Eagerly cached in-memory table should have already been materialized")
+
+    sql("UNCACHE TABLE testData")
+    assert(!isCached("testData"), "Table 'testData' should not be cached")
+    assert(!isMaterialized(rddId), "Uncached in-memory table should have been unpersisted")
+  }
+
+  test("CACHE TABLE tableName AS SELECT * FROM anotherTable") {
+    sql("CACHE TABLE testCacheTable AS SELECT * FROM testData")
+    assertCached(table("testCacheTable"))
+
+    val rddId = rddIdOf("testCacheTable")
+    assert(
+      isMaterialized(rddId),
+      "Eagerly cached in-memory table should have already been materialized")
+
+    uncacheTable("testCacheTable")
+    assert(!isMaterialized(rddId), "Uncached in-memory table should have been unpersisted")
+  }
+
+  test("CACHE TABLE tableName AS SELECT ...") {
+    sql("CACHE TABLE testCacheTable AS SELECT key FROM testData LIMIT 10")
+    assertCached(table("testCacheTable"))
+
+    val rddId = rddIdOf("testCacheTable")
+    assert(
+      isMaterialized(rddId),
+      "Eagerly cached in-memory table should have already been materialized")
+
+    uncacheTable("testCacheTable")
+    assert(!isMaterialized(rddId), "Uncached in-memory table should have been unpersisted")
+  }
+
+  test("CACHE LAZY TABLE tableName") {
+    sql("CACHE LAZY TABLE testData")
+    assertCached(table("testData"))
+
+    val rddId = rddIdOf("testData")
+    assert(
+      !isMaterialized(rddId),
+      "Lazily cached in-memory table shouldn't be materialized eagerly")
+
+    sql("SELECT COUNT(*) FROM testData").collect()
+    assert(
+      isMaterialized(rddId),
+      "Lazily cached in-memory table should have been materialized")
+
+    uncacheTable("testData")
+    assert(!isMaterialized(rddId), "Uncached in-memory table should have been unpersisted")
   }
 }

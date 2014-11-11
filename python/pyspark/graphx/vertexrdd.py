@@ -82,7 +82,7 @@ class VertexRDD(RDD):
     def filter(self, f):
         """
         >>> verts = VertexRDD(sc.parallelize(range(100)))
-        >>> evens = ftest.filter(lambda x: x[-1]%2 == 0)
+        >>> evens = verts.filter(lambda x: x[-1]%2 == 0)
         >>> evens.count() == len(filter(lambda x: x%2 == 0, range(100)))
         True
         """

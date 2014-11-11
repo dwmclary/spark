@@ -16,19 +16,22 @@
 #
 
 
-class EdgeTriplet(Object):
+class EdgeTriplet():
 
-    srcAttr = {}
-    dstAttr = {}
-    attr = {}
+    srcAttr = None
+    dstAttr = None
+    attr = None
     srcId = None
     destId = None
 
     """
     An edge triplet represents an edge along with the vertex attributes of its neighboring vertices.
     """
-    def __init__():
-    
+    def __init__(self, srcAttr={}, dstAttr={}, attr={}):
+        self.srcAttr = srcAttr
+        self.dstAttr = dstAttr
+        self.attr = attr
+        
     """
       Set the edge properties of this triplet from another edge
     """
@@ -41,13 +44,12 @@ class EdgeTriplet(Object):
 
     """
       Given one vertex in the edge, return the attribute hash for the other vertex.
-
     """
     def otherVertexAttr(self, vid):
-        if (vid == srcId):
-            return dstAttr
-        elif (vid == dstId):
-            return srcAttr
+        if (vid == self.srcId):
+            return self.dstAttr
+        elif (vid == self.dstId):
+            return self.srcAttr
         else:
             return None
 

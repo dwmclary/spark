@@ -15,7 +15,9 @@
 # limitations under the License.
 #
 
-class Edge(Object):
+from edgedirection import EdgeDirection
+
+class Edge():
   """
     Base class for an edge with srcId, destID, and attr.  attr includes an
     EdgeDirection
@@ -27,36 +29,41 @@ class Edge(Object):
   """
     Initialize an edge object.
   """
-  def __init__(srcId=0, dstId=0, attr={EdgeDirection()}):
+  def __init__(self, srcId=0, dstId=0, attr={EdgeDirection("Out")}):
     self.srcId = srcId
     self.dstId = dstId
     self.attr = attr
   
   """
     Given one vertex in an edge, return the other vertex.
-  >>> edge = Edge(1,2)
-  >>> dest = edge.otherVertexId(1)
-  >>> dest == 2
-  True
   """
   def otherVertexId(self, vid):
-    if (srcId == vid):
-      return dstId
-    elif (dstId == vid):
-      return srcId
+    """
+    >>> edge = Edge(1,2)
+    >>> dest = edge.otherVertexId(1)
+    >>> dest == 2
+    True
+    """
+    if (self.srcId == vid):
+      return self.dstId
+    elif (self.dstId == vid):
+      return self.srcId
     else:
       return None
   
   """
     Return the relative direction of the edge to the corresponding vertex.
-  >>> edge = Edge(1,2)
-  >>> dir = edge.relativeDirection(1)
-  >>> dir == EdgeDirection("Out")
   """
   def relativeDirection(self, vid):
-    if (vid == srcId):
+    """
+    >>> edge = Edge(1,2)
+    >>> dir = edge.relativeDirection(1)
+    >>> dir == EdgeDirection("Out")
+    True
+    """
+    if (vid == self.srcId):
       return EdgeDirection("Out")
-    elif (vid == dstId):
+    elif (vid == self.dstId):
       return EdgeDirection("In")
     else:
       return None

@@ -21,21 +21,25 @@ class EdgeDirectionException(Exception):
   def __str__(self):
     return repr(self.value)
 
-class EdgeDirection(Object):
-  name = None
+class EdgeDirection():
+  name = ""
 
-  def __init__(name):
-    if name in ("In", "Out", "Either", "Both"):
-      self.name = name
+  def __init__(self, dname):
+    if dname in ("In", "Out", "Either", "Both"):
+      self.name = dname
     else:
-      raise EdgeDirectionError("Directions can only be: In, Out, Either, Both")
+      raise EdgeDirectionException("Directions can only be: In, Out, Either, Both")
 
   def __str__(self):
-    return "EdgeDirection."+name
+    return "EdgeDirection."+self.name
+
+  def __hash__(self):
+    return hash("EdgeDirection."+self.name)
 
   def __eq__(self, other):
-    if self.name.equals(other.name):
-      return True
+    if self.name != None:
+      if self.name.equals(other.name):
+        return True
     return False
 
   def reverse(self):
@@ -45,5 +49,5 @@ class EdgeDirection(Object):
     """
     if self.name == "In":
       self.name = "Out"
-    else if self.name == "Out":
+    elif self.name == "Out":
       self.name = "In"

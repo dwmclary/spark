@@ -45,7 +45,7 @@ object BuildCommons {
     "kinesis-asl").map(ProjectRef(buildLocation, _))
 
   val assemblyProjects@Seq(assembly, examples, networkYarn, streamingKafkaAssembly) =
-    Seq("assembly", "examples", "network-yarn", "streaming-kafka-assembly")
+      Seq("assembly", "examples", "network-yarn", "streaming-kafka-assembly", "streaming-flume-assembly")
       .map(ProjectRef(buildLocation, _))
 
   val tools = ProjectRef(buildLocation, "tools")
@@ -329,6 +329,12 @@ object Assembly {
     jarName in assembly <<= (version, moduleName, hadoopVersion) map { (v, mName, hv) =>
       if (mName.contains("streaming-kafka-assembly")) {
         // This must match the same name used in maven (see external/kafka-assembly/pom.xml)
+        s"${mName}-${v}.jar"
+      } else {
+        s"${mName}-${v}-hadoop${hv}.jar"
+      }
+      if (mName.contains("streaming-flume-assembly")) {
+        // This must match the same name used in maven (see external/flume-assembly/pom.xml)
         s"${mName}-${v}.jar"
       } else {
         s"${mName}-${v}-hadoop${hv}.jar"

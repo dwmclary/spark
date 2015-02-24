@@ -1682,6 +1682,7 @@
       <modules>
         <module>external/kafka</module>
         <module>external/kafka-assembly</module>
+	<module>external/flume-assembly</module>
       </modules>
     </profile>
 

@@ -18,7 +18,7 @@ from py4j.java_collections import MapConverter
 from py4j.java_gateway import java_import, Py4JError
 
 from pyspark.storagelevel import StorageLevel
-from pyspark.serializers import PairDeserializer, NoOpSerializer
+from pyspark.serializers import PairDeserializer, NoOpSerializer, UTF8Deserializer
 from pyspark.streaming import DStream
 
 
@@ -33,25 +33,22 @@ class FlumeUtils(object):
   DEFAULT_POLLING_PARALLELISM = 5
   DEFAULT_POLLING_BATCH_SIZE = 1000
 
-@staticmethod
-def createStream(ssc, hostname, port, storageLevel=StorageLevel.MEMORY_AND_DISK_SER_2,
-enableDecompression=False, keyDecoder=utf8_decoder, valueDecoder=utf8_decoder):
-  java_import(ssc._jvm, "org.apache.spark.streaming.flume.FlumeUtils")
+  @staticmethod
+  def createStream(ssc, hostname, port, storageLevel=StorageLevel.MEMORY_AND_DISK_SER_2,
+    enableDecompression=True, keyDecoder=utf8_decoder, valueDecoder=utf8_decoder):
+    java_import(ssc._jvm, "org.apache.spark.streaming.flume.FlumeUtils")
+    jlevel = ssc._sc._getJavaStorageLevel(storageLevel)
+    jstream = ssc._jvm.FlumeUtils.createStream(ssc._jssc, hostname, port, jlevel)
+    stream = DStream(jstream, ssc, UTF8Deserializer())
+    # except Py4JError, e:
+    #   print e.message
 
-  try:
-    ssc._jvm.FlumeUtils.createStream(ssc, hostname, port, storageLevel, enableDecompression)
-  except Py4JError, e:
-    print e
-    # TODO: use --jar once it also work on driver
-    if not e.message or 'call a package' in e.message:
-        print "No flume package, please put the assembly jar into classpath:"
-        print " $ bin/spark-submit --driver-class-path external/flume-assembly/target/" + \
-              "scala-*/spark-streaming-flume-assembly-*.jar"
-    raise e
-  return None
+    return stream
 
-@staticmethod
-def createPollingStream(ssc, hostname, port,
-storageLevel=StorageLevel.MEMORY_AND_DISK_SER_2,
-keyDecoder=utf8_decoder, valueDecoder=utf8_decoder):
-  return None
+
+  @staticmethod
+  def createPollingStream(ssc, hostname, port,
+    storageLevel=StorageLevel.MEMORY_AND_DISK_SER_2,
+    keyDecoder=utf8_decoder, valueDecoder=utf8_decoder):
+
+    return None
